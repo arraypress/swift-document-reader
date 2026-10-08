@@ -13,6 +13,7 @@ import Foundation
 /// var options = ReaderOptions()
 /// options.preferTextLayer = false   // force OCR even on a born-digital PDF
 /// options.detectHeadings = false    // screenshots have no heading hierarchy
+/// options.enhance = true            // a phone photo of a page
 /// let result = try await DocumentReader.read(contentsOf: url, options: options)
 /// ```
 public struct ReaderOptions: Sendable {
@@ -48,6 +49,22 @@ public struct ReaderOptions: Sendable {
 
     /// Pages to read, 1-based. Empty reads them all.
     public var pageRange: [Int] = []
+
+    /// Greyscale, raise the contrast and sharpen each page before recognising it.
+    ///
+    /// Off by default, because it is not universally an improvement. Measured against known
+    /// text it more than halved the character error on a phone photograph (51.8% to 21.9%) and
+    /// made a fax-quality scan slightly *worse* (1.0% to 2.5%). It earns its place on bad input
+    /// and costs accuracy on merely mediocre input. Never applied when reading barcodes: the
+    /// contrast stretch that rescues faded text clips the quiet zone a scanner needs.
+    public var enhance: Bool = false
+
+    /// Trade accuracy for speed when reading lines.
+    ///
+    /// Applies to ``DocumentReader/lines(contentsOf:options:)`` and
+    /// ``DocumentReader/text(contentsOf:options:)`` only — document recognition has one level.
+    /// Also turns off language correction, which is most of what the accurate level costs.
+    public var fastRecognition: Bool = false
 
     public init() {}
 }

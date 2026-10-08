@@ -48,7 +48,7 @@ public enum DocumentReader {
     ) async throws -> DocumentResult {
         let started = Date()
 
-        if let pdf = PDFDocument(url: url) {
+        if let pdf = PDFProbe.document(at: url) {
             guard pdf.pageCount > 0 else { throw DocumentReaderError.emptyDocument(url) }
             var pages: [DocumentPage] = []
             for index in 0..<pdf.pageCount {
@@ -92,7 +92,7 @@ public enum DocumentReader {
 
         // A born-digital PDF already contains exactly what the author typed. Recognising it
         // could only introduce errors, and costs a render plus a recognition pass to do so.
-        if options.preferTextLayer, let text = page.string, hasMeaningfulText(text) {
+        if options.preferTextLayer, let text = page.string, TextLayer.isMeaningful(text) {
             return DocumentPage(
                 pageNumber: number,
                 blocks: TextLayerParser.blocks(from: text),
@@ -135,7 +135,7 @@ public enum DocumentReader {
             request.textRecognitionOptions.customWords = options.customWords
         }
 
-        guard let container = try await request.perform(on: image).first?.document else {
+        guard let container = try await request.perform(on: ImageEnhancer.prepared(image, options)).first?.document else {
             throw DocumentReaderError.recognitionFailed(page: number)
         }
 
@@ -148,18 +148,4 @@ public enum DocumentReader {
             duration: Date().timeIntervalSince(started)
         )
     }
-
-    // MARK: - Text Layer
-
-    /// Whether a PDF's text layer is worth using.
-    ///
-    /// Scanned PDFs frequently carry an empty or near-empty text layer — a few stray characters
-    /// from a failed OCR pass, or whitespace alone. Taking that at face value returns a blank
-    /// page for a document that recognises perfectly well, so anything this thin falls through
-    /// to recognition instead.
-    private static func hasMeaningfulText(_ text: String) -> Bool {
-        text.trimmed.count >= minimumTextLayerCharacters
-    }
-
-    private static let minimumTextLayerCharacters = 16
 }

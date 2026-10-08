@@ -14,6 +14,12 @@ import Foundation
 /// and a heading is simply a paragraph set in larger type. The only signal available is the
 /// height of each block's bounding box.
 ///
+/// The height measured is the **type**, not the block: a block's frame grows with every line
+/// it wraps onto, so a two-line paragraph of body text is twice the height of a one-line
+/// heading in a larger font, and measured by frame it was promoted to a heading — on 6 of 8
+/// synthetic pages, while the real 18pt heading beside it was missed. The median word height
+/// does not grow with the line count, so it is what is compared.
+///
 /// Fixed ratio thresholds do not survive contact with real pages. Measured on one test
 /// document, body text sat at 0.0187 of page height and its subheadings at 0.0208 — a ratio of
 /// 1.11, which a plausible-looking 1.15 cut missed entirely, while a page with a larger
@@ -31,16 +37,29 @@ enum HeadingClassifier {
     static func apply(to blocks: [DocumentBlock], title: String?) -> [DocumentBlock] {
         let heights = blocks.compactMap { block -> CGFloat? in
             guard case .paragraph = block.kind else { return nil }
-            return block.frame.height
+            return typeHeight(of: block)
         }
         guard heights.count > 1, let body = bodyHeight(from: heights) else { return blocks }
 
+        let trimmedTitle = title?.trimmed
+        let titleBlock = blocks.first { block in
+            guard case .paragraph = block.kind, let trimmedTitle, !trimmedTitle.isEmpty else { return false }
+            return block.text == trimmedTitle
+        }
+
         // Sizes meaningfully larger than body text, largest first. 6% is enough to clear
         // measurement noise on the same font without discarding a genuine one-step heading.
-        let headingSizes = cluster(heights.filter { $0 > body * minimumHeadingRatio })
-            .sorted(by: >)
-
-        let trimmedTitle = title?.trimmed
+        //
+        // The title's own size is left out when the recogniser named it: it is level 1 by that
+        // naming, and counting its size as well made the first real heading level 3.
+        let headingSizes = cluster(
+            heights.filter { height in
+                guard height > body * minimumHeadingRatio else { return false }
+                guard let titleBlock else { return true }
+                let titleHeight = typeHeight(of: titleBlock)
+                return abs(height - titleHeight) > titleHeight * clusterTolerance
+            }
+        ).sorted(by: >)
 
         return blocks.map { block in
             guard case .paragraph = block.kind else { return block }
@@ -51,8 +70,9 @@ enum HeadingClassifier {
                 return DocumentBlock(kind: .heading(level: 1), text: block.text, frame: block.frame, words: block.words)
             }
 
+            let height = typeHeight(of: block)
             guard let index = headingSizes.firstIndex(where: {
-                abs(block.frame.height - $0) <= $0 * clusterTolerance
+                abs(height - $0) <= $0 * clusterTolerance
             }) else {
                 return block
             }
@@ -77,6 +97,18 @@ enum HeadingClassifier {
     private static let maximumLevel = 3
 
     // MARK: - Measurement
+
+    /// The height of a block's type.
+    ///
+    /// The median of its words' heights, so a paragraph that wraps onto three lines measures
+    /// the same as one that fits on one. A block with no words — a script Vision does not
+    /// segment, or a block built by hand — falls back to its frame, which is the type height
+    /// for a single line.
+    static func typeHeight(of block: DocumentBlock) -> CGFloat {
+        guard let words = block.words, !words.isEmpty else { return block.frame.height }
+        let sorted = words.map(\.frame.height).sorted()
+        return sorted[sorted.count / 2]
+    }
 
     /// The page's body text height.
     ///

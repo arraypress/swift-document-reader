@@ -97,6 +97,38 @@ final class DocumentReaderTests: XCTestCase {
         XCTAssertTrue(classified.allSatisfy { level(of: $0) == nil })
     }
 
+    /// A paragraph that wraps is taller than a one-line heading in a bigger font. Measured by
+    /// frame it became a heading on 6 of 8 synthetic pages — the layout below — and the real
+    /// heading beside it was taken for body text; measured by its words it stays body.
+    func testWrappedParagraphIsNotAHeading() {
+        let blocks = [
+            paragraph("Field Survey Results", height: 0.033, wordHeight: 0.033),
+            paragraph("Method", height: 0.023, wordHeight: 0.023),
+            paragraph("Samples were collected at dawn from four sites and stored cold.", height: 0.040, wordHeight: 0.015),
+        ]
+
+        let classified = HeadingClassifier.apply(to: blocks, title: "Field Survey Results")
+
+        XCTAssertEqual(level(of: classified[0]), 1)
+        XCTAssertEqual(level(of: classified[1]), 2, "the 18pt heading is a heading")
+        XCTAssertNil(level(of: classified[2]), "two lines of body text are still body text")
+    }
+
+    /// The recognised title owns level 1; the next size down is the first heading, level 2 —
+    /// not level 3 because the title's own size was counted as a level too.
+    func testFirstHeadingUnderATitleIsLevelTwo() {
+        let blocks = [
+            paragraph("Field Survey Results", height: 0.033, wordHeight: 0.033),
+            paragraph("Method", height: 0.023, wordHeight: 0.023),
+            paragraph("Body text.", height: 0.015, wordHeight: 0.015),
+            paragraph("More body text.", height: 0.015, wordHeight: 0.015),
+        ]
+
+        let classified = HeadingClassifier.apply(to: blocks, title: "Field Survey Results")
+
+        XCTAssertEqual(level(of: classified[1]), 2)
+    }
+
     func testHeadingDetectionCanBeDisabled() {
         let blocks = [
             paragraph("Huge Title", height: 0.05),
@@ -246,6 +278,20 @@ final class DocumentReaderTests: XCTestCase {
             kind: .paragraph,
             text: text,
             frame: CGRect(x: 0, y: 0, width: 0.5, height: height)
+        )
+    }
+
+    /// A paragraph whose words are `wordHeight` tall — its frame is whatever `height` says,
+    /// which for a wrapped paragraph is several lines of them.
+    private func paragraph(_ text: String, height: CGFloat, wordHeight: CGFloat) -> DocumentBlock {
+        let words = text.split(separator: " ").map {
+            RecognizedWord(text: String($0), frame: CGRect(x: 0, y: 0, width: 0.05, height: wordHeight), confidence: 1)
+        }
+        return DocumentBlock(
+            kind: .paragraph,
+            text: text,
+            frame: CGRect(x: 0, y: 0, width: 0.5, height: height),
+            words: words
         )
     }
 
