@@ -18,7 +18,10 @@ enum PageImages {
     /// One page: its number, and either its text layer or its image.
     enum Page {
         case textLayer(number: Int, text: String)
-        case image(number: Int, image: CGImage)
+        /// A page to recognise, with what little its text layer held — too
+        /// thin to trust over recognition, too real to throw away if
+        /// recognition finds nothing.
+        case image(number: Int, image: CGImage, thinText: String?)
     }
 
     /// Walks the selected pages of `url`, calling `body` with each.
@@ -41,15 +44,16 @@ enum PageImages {
                 try Task.checkCancellation()
                 guard let page = pdf.page(at: index) else { continue }
 
-                if allowTextLayer, options.preferTextLayer, let text = page.string,
-                   TextLayer.isMeaningful(text) {
+                let text = TextLayer.cleaned(page.string ?? "")
+                if allowTextLayer, options.preferTextLayer, TextLayer.isMeaningful(text) {
                     try await body(.textLayer(number: number, text: text))
                     continue
                 }
                 guard let image = PageRasterizer.render(page: page, scale: options.renderScale) else {
                     throw DocumentReaderError.renderFailed(page: number)
                 }
-                try await body(.image(number: number, image: image))
+                try await body(.image(number: number, image: image,
+                                      thinText: allowTextLayer && !text.isEmpty ? text : nil))
             }
             return
         }
@@ -57,7 +61,7 @@ enum PageImages {
         guard let image = PageRasterizer.image(at: url) else {
             throw DocumentReaderError.unreadableFile(url)
         }
-        try await body(.image(number: 1, image: image))
+        try await body(.image(number: 1, image: image, thinText: nil))
     }
 }
 
@@ -71,8 +75,21 @@ enum TextLayer {
     /// page for a document that recognises perfectly well, so anything this thin falls through
     /// to recognition instead.
     static func isMeaningful(_ text: String) -> Bool {
-        text.trimmed.count >= minimumCharacters
+        cleaned(text).count >= minimumCharacters
     }
 
     static let minimumCharacters = 16
+
+    /// A text layer without what is not text: PDFKit writes U+FFFC, the
+    /// object-replacement character, for every image or form object on the
+    /// page, and a LibreOffice cover page came back as "￼ ￼ 1 V994" — two
+    /// placeholders counted as characters, the real words too few to pass
+    /// the bar, and then thrown away when recognition found nothing.
+    static func cleaned(_ text: String) -> String {
+        text.replacingOccurrences(of: "\u{FFFC}", with: "")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
 }

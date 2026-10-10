@@ -92,21 +92,21 @@ public enum DocumentReader {
 
         // A born-digital PDF already contains exactly what the author typed. Recognising it
         // could only introduce errors, and costs a render plus a recognition pass to do so.
-        if options.preferTextLayer, let text = page.string, TextLayer.isMeaningful(text) {
-            return DocumentPage(
-                pageNumber: number,
-                blocks: TextLayerParser.blocks(from: text),
-                title: nil,
-                detectedData: [],
-                source: .textLayer,
-                duration: Date().timeIntervalSince(started)
-            )
+        let text = TextLayer.cleaned(page.string ?? "")
+        func fromTextLayer() -> DocumentPage {
+            DocumentPage(pageNumber: number, blocks: TextLayerParser.blocks(from: text), title: nil,
+                         detectedData: [], source: .textLayer, duration: Date().timeIntervalSince(started))
         }
+        if options.preferTextLayer, TextLayer.isMeaningful(text) { return fromTextLayer() }
 
         guard let image = PageRasterizer.render(page: page, scale: options.renderScale) else {
             throw DocumentReaderError.renderFailed(page: number)
         }
-        return try await read(image: image, number: number, options: options)
+        let recognised = try await read(image: image, number: number, options: options)
+        // A thin text layer is passed over for recognition — but when
+        // recognition finds nothing, those few real characters are the page.
+        if options.preferTextLayer, recognised.blocks.isEmpty, !text.isEmpty { return fromTextLayer() }
+        return recognised
     }
 
     private static func read(

@@ -54,7 +54,7 @@ public extension DocumentReader {
     ) async throws -> [DetectedBarcode] {
         var found: [DetectedBarcode] = []
         try await PageImages.forEach(in: url, options: options, allowTextLayer: false) { page in
-            guard case .image(let number, let image) = page else { return }
+            guard case .image(let number, let image, _) = page else { return }
             found += try await BarcodeDetector.barcodes(in: image, page: number)
         }
         return found
@@ -72,8 +72,14 @@ public extension DocumentReader {
             switch page {
             case .textLayer(let number, let text):
                 pages.append(TextPage(pageNumber: number, text: text, source: .textLayer, lines: []))
-            case .image(let number, let image):
+            case .image(let number, let image, let thinText):
                 let lines = try await LineRecognizer.lines(in: image, options: options)
+                // Nothing recognised, but the text layer had a little real
+                // text: that is the page's text, not an empty page.
+                if lines.isEmpty, let thinText {
+                    pages.append(TextPage(pageNumber: number, text: thinText, source: .textLayer, lines: []))
+                    return
+                }
                 pages.append(TextPage(
                     pageNumber: number,
                     text: lines.map(\.text).joined(separator: "\n"),
